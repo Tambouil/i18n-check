@@ -53,7 +53,7 @@ const collectFunctionsWithTParam = (path: string) => {
           firstParam.name &&
           ts.isIdentifier(firstParam.name) &&
           firstParam.type &&
-          ts.isFunctionTypeNode(firstParam.type)
+          (ts.isFunctionTypeNode(firstParam.type) || ts.isTypeReferenceNode(firstParam.type))
         ) {
           const paramName = firstParam.name.text;
           const functionName = ts.isIdentifier(node.name) ? node.name.text : null;
