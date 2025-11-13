@@ -5,12 +5,100 @@ const USE_TRANSLATIONS = 'useTranslations';
 const GET_TRANSLATIONS = 'getTranslations';
 const COMMENT_CONTAINS_STATIC_KEY_REGEX = /t\((["'])(.*?[^\\])(["'])\)/;
 
+// Global registry for functions with 't' parameter across all files
+type FunctionWithTParam = {
+  functionName: string;
+  paramName: string;
+  keysUsed: string[];
+};
+const globalFunctionsWithTParam: FunctionWithTParam[] = [];
+
 export const extract = (filesPaths: string[]) => {
+  // Reset global registry
+  globalFunctionsWithTParam.length = 0;
+
+  // Pass 1: Collect all functions with 't' parameter from all files
+  filesPaths.forEach((path) => {
+    collectFunctionsWithTParam(path);
+  });
+
+  // Pass 2: Extract keys from all files using the global registry
   return filesPaths.flatMap(getKeys).sort((a, b) => {
     return a.key > b.key ? 1 : -1;
   });
 };
 
+// Pass 1: Collect functions with 't' parameter from a file
+const collectFunctionsWithTParam = (path: string) => {
+  const content = fs.readFileSync(path, 'utf-8');
+  const sourceFile = ts.createSourceFile(
+    path,
+    content,
+    ts.ScriptTarget.Latest,
+    true
+  );
+
+  const visit = (node: ts.Node) => {
+    // Track exported functions/schemas that accept 't' as parameter
+    if (ts.isVariableDeclaration(node)) {
+      if (
+        node.initializer &&
+        ts.isArrowFunction(node.initializer) &&
+        node.initializer.parameters.length > 0
+      ) {
+        const firstParam = node.initializer.parameters[0];
+
+        if (
+          ts.isParameter(firstParam) &&
+          firstParam.name &&
+          ts.isIdentifier(firstParam.name) &&
+          firstParam.type &&
+          ts.isFunctionTypeNode(firstParam.type)
+        ) {
+          const paramName = firstParam.name.text;
+          const functionName = ts.isIdentifier(node.name) ? node.name.text : null;
+
+          if (functionName) {
+            const functionTracker: FunctionWithTParam = {
+              functionName,
+              paramName,
+              keysUsed: [],
+            };
+
+            // Visit function body to find t('key') calls
+            const visitFunctionBody = (bodyNode: ts.Node) => {
+              if (
+                ts.isCallExpression(bodyNode) &&
+                ts.isIdentifier(bodyNode.expression) &&
+                bodyNode.expression.text === paramName
+              ) {
+                const [argument] = bodyNode.arguments;
+                if (argument && ts.isStringLiteral(argument)) {
+                  functionTracker.keysUsed.push(argument.text);
+                }
+              }
+              ts.forEachChild(bodyNode, visitFunctionBody);
+            };
+
+            if (node.initializer.body) {
+              ts.forEachChild(node.initializer.body, visitFunctionBody);
+            }
+
+            if (functionTracker.keysUsed.length > 0) {
+              globalFunctionsWithTParam.push(functionTracker);
+            }
+          }
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(sourceFile, visit);
+};
+
+// Pass 2: Extract keys from a file
 const getKeys = (path: string) => {
   const content = fs.readFileSync(path, 'utf-8');
   const sourceFile = ts.createSourceFile(
@@ -186,6 +274,57 @@ const getKeys = (path: string) => {
               pushNamespace({ name: argument.text, variable });
             } else if (argument === undefined) {
               pushNamespace({ name: '', variable });
+            }
+          }
+        }
+      }
+    }
+
+    // Detect calls to functions with 't' parameter: mySchema(t) or mySchema(useTranslations('Namespace'))
+    // Uses global registry collected in Pass 1
+    if (ts.isCallExpression(node)) {
+      if (ts.isIdentifier(node.expression)) {
+        const calledFunctionName = node.expression.text;
+        const trackedFunction = globalFunctionsWithTParam.find(
+          (f) => f.functionName === calledFunctionName
+        );
+
+        if (trackedFunction && node.arguments.length > 0) {
+          const [argument] = node.arguments;
+
+          // Pattern 1: Direct call with useTranslations('Namespace')
+          if (
+            ts.isCallExpression(argument) &&
+            ts.isIdentifier(argument.expression) &&
+            argument.expression.text === USE_TRANSLATIONS
+          ) {
+            const [namespaceArg] = argument.arguments;
+            if (namespaceArg && ts.isStringLiteral(namespaceArg)) {
+              const namespace = namespaceArg.text;
+
+              // Add all keys used in that function with the namespace
+              trackedFunction.keysUsed.forEach((keyName) => {
+                foundKeys.push({
+                  key: namespace ? `${namespace}.${keyName}` : keyName,
+                  meta: { file: path, namespace },
+                });
+              });
+            }
+          }
+
+          // Pattern 2: Call with variable: mySchema(t) where t = useTranslations('Namespace')
+          if (ts.isIdentifier(argument)) {
+            const variableName = argument.text;
+            const namespace = getCurrentNamespaceForIdentifier(variableName);
+
+            if (namespace) {
+              // Add all keys used in that function with the namespace
+              trackedFunction.keysUsed.forEach((keyName) => {
+                foundKeys.push({
+                  key: namespace.name ? `${namespace.name}.${keyName}` : keyName,
+                  meta: { file: path, namespace: namespace.name },
+                });
+              });
             }
           }
         }

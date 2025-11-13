@@ -20,6 +20,7 @@ const generateMetaDataExample = path.join(
   srcPath,
   'GenerateMetadataExample.tsx'
 );
+const schemaWithTParamExample = path.join(srcPath, 'SchemaWithTParam.tsx');
 
 describe('nextIntlSrcParser', () => {
   it('should find all the translation keys', () => {
@@ -628,6 +629,48 @@ describe('nextIntlSrcParser', () => {
         meta: {
           file: generateMetaDataExample,
           namespace: 'generate',
+        },
+      },
+    ]);
+  });
+
+  it('should find keys in functions with t parameter (Pattern 1: Schema pattern)', () => {
+    const keys = extract([schemaWithTParamExample]);
+
+    expect(keys).toEqual([
+      {
+        key: 'FormErrors.email_invalid',
+        meta: {
+          file: schemaWithTParamExample,
+          namespace: 'FormErrors',
+        },
+      },
+      {
+        key: 'FormErrors.name_required',
+        meta: {
+          file: schemaWithTParamExample,
+          namespace: 'FormErrors',
+        },
+      },
+      {
+        key: 'FormErrors.title_required',
+        meta: {
+          file: schemaWithTParamExample,
+          namespace: 'FormErrors',
+        },
+      },
+      {
+        key: 'Login.password_too_short',
+        meta: {
+          file: schemaWithTParamExample,
+          namespace: 'Login',
+        },
+      },
+      {
+        key: 'Login.username_required',
+        meta: {
+          file: schemaWithTParamExample,
+          namespace: 'Login',
         },
       },
     ]);
