@@ -23,7 +23,9 @@ import {
 import { flattenTranslations } from '../utils/flattenTranslations';
 import path from 'node:path';
 
-const version = require('../../package.json').version;
+// @ts-ignore - __dirname available in compiled CommonJS
+const packageJson = require(path.join(__dirname, '../../../package.json'));
+const version = packageJson.version;
 
 program
   .version(version)
